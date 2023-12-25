@@ -155,6 +155,33 @@ func getReplicaAddrs() ([]string, error) {
 // 	}
 // }
 
+func initMetrics() {
+
+	GaugeMetricsMap = make(map[string]prometheus.GaugeVec, 256)
+	CounterMetricsMap = make(map[string]prometheus.CounterVec, 256)
+	SummaryMetricsMap = make(map[string]prometheus.Summary, 256)
+	RoleByDataSource = make(map[int]string, 128)
+	TableNameByID = make(map[string]string, 256)
+	RoleByDataSource[0] = "meta_server"
+	RoleByDataSource[1] = "replica_server"
+
+
+	var addrs []string
+	//var err error
+
+	addrs = viper.GetStringSlice("meta_servers")
+
+	replicAddrs,err := getReplicaAddrs()
+	if(err != nil) {
+		log.Errorf("Get raw metrics from %s failed, err: %s", replicAddrs, err)
+ 		return
+	}
+
+	addrs = append(addrs,replicAddrs...)
+	
+	getProMetricsByAddrs(addrs)
+}
+
 func getProMetricsByAddrs(addrs []string) {
 	for _, addr := range addrs {
 		data, err := getOneServerMetrics(addr)
@@ -207,32 +234,7 @@ func getProMetricsByAddrs(addrs []string) {
 	}
 }
 
-func initMetrics() {
 
-	GaugeMetricsMap = make(map[string]prometheus.GaugeVec, 256)
-	CounterMetricsMap = make(map[string]prometheus.CounterVec, 256)
-	SummaryMetricsMap = make(map[string]prometheus.Summary, 256)
-	RoleByDataSource = make(map[int]string, 128)
-	TableNameByID = make(map[string]string, 256)
-	RoleByDataSource[0] = "meta_server"
-	RoleByDataSource[1] = "replica_server"
-
-
-	var addrs []string
-	//var err error
-
-	addrs = viper.GetStringSlice("meta_servers")
-
-	replicAddrs,err := getReplicaAddrs()
-	if(err != nil) {
-		log.Errorf("Get raw metrics from %s failed, err: %s", replicAddrs, err)
- 		return
-	}
-
-	addrs = append(addrs,replicAddrs...)
-	
-	getProMetricsByAddrs(addrs)
-}
 
 // Register all metrics.
 //将初始化的代码抽出来，形成公共函数
