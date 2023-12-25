@@ -155,7 +155,7 @@ func getReplicaAddrs() ([]string, error) {
 // 	}
 // }
 
-func initMetrics() {
+func InitMetrics() {
 
 	GaugeMetricsMap = make(map[string]prometheus.GaugeVec, 256)
 	CounterMetricsMap = make(map[string]prometheus.CounterVec, 256)

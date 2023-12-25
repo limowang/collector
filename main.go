@@ -84,7 +84,7 @@ func main() {
 		return
 	}
 
-	metrics.initMetrics()
+	metrics.InitMetrics()
 
 	// var meta_collector Collector
 	// var replic_collector Collector
