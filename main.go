@@ -26,12 +26,12 @@ import (
 	"strings"
 	"syscall"
 
-	"./metrics"
+	"github.com/limowang/collector/metrics"
 
-	"github.com/pegasus-kv/collector/avail"
+	"github.com/limowang/collector/avail"
 
 	//"github.com/pegasus-kv/collector/metrics"
-	"github.com/pegasus-kv/collector/webui"
+	"github.com/limowang/collector/webui"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 	"gopkg.in/natefinch/lumberjack.v2"
