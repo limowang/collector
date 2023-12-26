@@ -50,7 +50,7 @@ type Metric struct {
 type Metrics []Metric
 
 //针对p50,p90等级别定义层级
-var TaskLevel = [5]string{"p50","p90","p95","p99","p999"}
+//var TaskLevel = [5]string{"p50","p90","p95","p99","p999"}
 var GaugeMetricsMap map[string]prometheus.GaugeVec
 var CounterMetricsMap map[string]prometheus.CounterVec
 var SummaryMetricsMap map[string]prometheus.Summary
@@ -479,12 +479,37 @@ func updateTaskMetric(metric Metric,endpoint string,title string,dsource int) {
 		//log.Warnf("Todo metric type %s", metric.mtype)
 		if gauge, ok := GaugeMetricsMap[metric.name];ok {
 			//各个级别的数据依次更新
-			for i := 0; i < 5; i++ {
-				gauge.With(
-					prometheus.Labels{"endpoint": endpoint,
-						"role": role, "level": TaskLevel[i],
-						"title": title}).Set(float64(metric.values[i]))
-			}
+			// for i := 0; i < 5; i++ {
+			// 	gauge.With(
+			// 		prometheus.Labels{"endpoint": endpoint,
+			// 			"role": role, "level": TaskLevel[i],
+			// 			"title": title}).Set(float64(metric.values[i]))
+			// }
+			p := float64(metric.values[0])
+			gauge.With(
+				prometheus.Labels{"endpoint": endpoint,
+					"role": role, "level": "p50",
+					"title": title}).Set(p)
+			p = float64(metric.values[1])
+			gauge.With(
+				prometheus.Labels{"endpoint": endpoint,
+					"role": role, "level": "p90",
+					"title": title}).Set(p)
+			p = float64(metric.values[2])
+			gauge.With(
+				prometheus.Labels{"endpoint": endpoint, 
+					"role": role, "level": "p95",
+					"title": title}).Set(p)
+			p = float64(metric.values[3])
+			gauge.With(
+				prometheus.Labels{"endpoint": endpoint,
+					"role": role, "level": "p99",
+					"title": title}).Set(p)
+			p = float64(metric.values[4])
+			gauge.With(
+				prometheus.Labels{"endpoint": endpoint,
+					"role": role, "level": "p999",
+					"title": title}).Set(p)
 		}else {
 			log.Warnf("Unknown metric name %s", metric.name)
 		}
