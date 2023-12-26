@@ -49,6 +49,8 @@ type Metric struct {
 
 type Metrics []Metric
 
+//针对p50,p90等级别定义层级
+var TaskLevel = [5]string{"p50","p90","p95","p99","p999"}
 var GaugeMetricsMap map[string]prometheus.GaugeVec
 var CounterMetricsMap map[string]prometheus.CounterVec
 var SummaryMetricsMap map[string]prometheus.Summary
@@ -155,33 +157,6 @@ func getReplicaAddrs() ([]string, error) {
 // 	}
 // }
 
-func InitMetrics() {
-
-	GaugeMetricsMap = make(map[string]prometheus.GaugeVec, 256)
-	CounterMetricsMap = make(map[string]prometheus.CounterVec, 256)
-	SummaryMetricsMap = make(map[string]prometheus.Summary, 256)
-	RoleByDataSource = make(map[int]string, 128)
-	TableNameByID = make(map[string]string, 256)
-	RoleByDataSource[0] = "meta_server"
-	RoleByDataSource[1] = "replica_server"
-
-
-	var addrs []string
-	//var err error
-
-	addrs = viper.GetStringSlice("meta_servers")
-
-	replicAddrs,err := getReplicaAddrs()
-	if(err != nil) {
-		log.Errorf("Get raw metrics from %s failed, err: %s", replicAddrs, err)
- 		return
-	}
-
-	addrs = append(addrs,replicAddrs...)
-	
-	getProMetricsByAddrs(addrs)
-}
-
 func getProMetricsByAddrs(addrs []string) {
 	for _, addr := range addrs {
 		data, err := getOneServerMetrics(addr)
@@ -214,17 +189,25 @@ func getProMetricsByAddrs(addrs []string) {
 						Help: desc,
 					}, []string{"endpoint", "role", "level", "title"})
 					GaugeMetricsMap[name] = *gaugeMetric
-				case "Percentile":
-					if _, ok := SummaryMetricsMap[name]; ok {
+				case "Percentile":				//这个需要改动不能用这个表示,用gauge来表示分位数  --level(p50,p99),title(task_name)来替代区分
+					if _, ok := GaugeMetricsMap[name]; ok {
 						continue
 					}
-					summaryMetric := promauto.NewSummary(prometheus.SummaryOpts{
+					gaugeMetric := promauto.NewGaugeVec(prometheus.GaugeOpts{
 						Name: name,
 						Help: desc,
-						Objectives: map[float64]float64{
-							0.5: 0.05, 0.9: 0.01, 0.95: 0.005, 0.99: 0.001, 0.999: 0.0001},
-					})
-					SummaryMetricsMap[name] = summaryMetric
+					}, []string{"endpoint", "role", "level", "title"})
+					GaugeMetricsMap[name] = *gaugeMetric
+					// if _, ok := SummaryMetricsMap[name]; ok {
+					// 	continue
+					// }
+					// summaryMetric := promauto.NewSummary(prometheus.SummaryOpts{
+					// 	Name: name,
+					// 	Help: desc,
+					// 	Objectives: map[float64]float64{
+					// 		0.5: 0.05, 0.9: 0.01, 0.95: 0.005, 0.99: 0.001, 0.999: 0.0001},
+					// })
+					// SummaryMetricsMap[name] = summaryMetric
 				case "Histogram":
 				default:
 					log.Errorf("Unsupport metric type %s", mtype)
@@ -234,7 +217,32 @@ func getProMetricsByAddrs(addrs []string) {
 	}
 }
 
+func InitMetrics() {
 
+	GaugeMetricsMap = make(map[string]prometheus.GaugeVec, 256)
+	CounterMetricsMap = make(map[string]prometheus.CounterVec, 256)
+	SummaryMetricsMap = make(map[string]prometheus.Summary, 256)
+	RoleByDataSource = make(map[int]string, 128)
+	TableNameByID = make(map[string]string, 256)
+	RoleByDataSource[0] = "meta_server"
+	RoleByDataSource[1] = "replica_server"
+
+
+	var addrs []string
+	//var err error
+
+	addrs = viper.GetStringSlice("meta_servers")
+
+	replicAddrs,err := getReplicaAddrs()
+	if(err != nil) {
+		log.Errorf("Get raw metrics from %s failed, err: %s", replicAddrs, err)
+ 		return
+	}
+
+	addrs = append(addrs,replicAddrs...)
+	
+	getProMetricsByAddrs(addrs)
+}
 
 // Register all metrics.
 //将初始化的代码抽出来，形成公共函数
@@ -388,6 +396,7 @@ func processAllServerMetrics(dsource int) {
 	}
 	metricsByTableID := make(map[string]Metrics, 128)
 	metricsByServerTableID := make(map[string]Metrics, 128)
+	metricsByTaskName := make(map[string]Metrics, 128)  	//针对profiler类型进行处理
 	var metricsOfCluster []Metric
 	metricsByAddr := make(map[string]Metrics, 128)
 	for _, addr := range addrs {
@@ -401,10 +410,15 @@ func processAllServerMetrics(dsource int) {
 			etype := entity.Get("type").String()
 			switch etype {
 			case "replica":
+			case "profiler":
+				taskName := entity.Get("attributes").Get("task_name").String()
+				mergeIntoServerLevelTaskMetrics(entity.Get("metrics").Array(),
+					taskName,&metricsByTaskName)
 			case "partition":
 				tableID := entity.Get("attributes").Get("table_id").String()
 				mergeIntoClusterLevelTableMetric(entity.Get("metrics").Array(),
 					tableID, &metricsByTableID)
+				updateServerLevelTaskMetrics(addr,metricsByTaskName,dsource)
 			case "table":
 				tableID := entity.Get("attributes").Get("table_id").String()
 				mergeIntoClusterLevelTableMetric(entity.Get("metrics").Array(),
@@ -423,10 +437,63 @@ func processAllServerMetrics(dsource int) {
 		}
 	}
 
+	//updateServerLevelTaskMetrics(metricsByTaskName,dsource)
 	updateClusterLevelTableMetrics(metricsByTableID,dsource)
 	updateServerLevelServerMetrics(metricsByAddr,dsource)
 	updateClusterLevelMetrics(metricsOfCluster,dsource)
 }
+
+//将profiler数据更新到prometheus集合中，方便后面采集
+func updateServerLevelTaskMetrics(addr string,metricsByTaskName map[string]Metrics,dsource int) {
+	for taskName, metrics := range metricsByTaskName {
+		//实际的更新操作
+		for _, metric := range metrics {
+			updateTaskMetric(metric,addr,taskName,dsource)
+		}
+	}
+}
+
+//新实现的针对profile指标更新到prometheus中的函数
+func updateTaskMetric(metric Metric,endpoint string,title string,dsource int) {
+	role := RoleByDataSource[dsource]
+	switch metric.mtype {
+	case "Counter":
+		if counter, ok := CounterMetricsMap[metric.name]; ok {
+			counter.With(
+				prometheus.Labels{"endpoint": endpoint,
+					"role": role, "level": "Task",
+					"title": title}).Add(float64(metric.value))
+		} else {
+			log.Warnf("Unknown metric name %s", metric.name)
+		}
+	case "Gauge":
+		if gauge, ok := GaugeMetricsMap[metric.name]; ok {
+			gauge.With(
+				prometheus.Labels{"endpoint": endpoint,
+					"role": role, "level": "Task",
+					"title": title}).Set(float64(metric.value))
+		} else {
+			log.Warnf("Unknown metric name %s", metric.name)
+		}
+	case "Percentile":
+		//log.Warnf("Todo metric type %s", metric.mtype)
+		if gauge, ok := GaugeMetricsMap[metric.name];ok {
+			//各个级别的数据依次更新
+			for i := 0; i < 5; i++ {
+				gauge.With(
+					prometheus.Labels{"endpoint": endpoint,
+						"role": role, "level": TaskLevel[i],
+						"title": title}).Set(float64(metric.values[i]))
+			}
+		}else {
+			log.Warnf("Unknown metric name %s", metric.name)
+		}
+	case "Histogram":
+	default:
+		log.Warnf("Unsupport metric type %s", metric.mtype)
+	}
+}
+
 
 // Update table metrics. They belong to a specified server.
 func updateServerLevelTableMetrics(addr string, metricsByServerTableID map[string]Metrics,dsource int) {
@@ -545,6 +612,61 @@ func collectServerLevelServerMetrics(metrics []gjson.Result, addr string,
 	(*metricsByAddr)[addr] = mts
 }
 
+//profiler的percentile类型数据合并收集并存
+func mergeIntoServerLevelTaskMetrics(metrics []gjson.Result, taskName string,
+	metricsByTaskName *map[string]Metrics) {
+		if _, ok := (*metricsByTaskName)[taskName]; ok {
+			mts := (*metricsByTaskName)[taskName]
+			for _, metric := range metrics {
+				name := metric.Get("name").String()
+				mtype := metric.Get("type").String()
+				value := metric.Get("value").Float()
+				for _, m := range mts {
+					if name == m.name {
+						switch mtype {
+						case "Counter":
+							m.value = value				//这么处理不知道正确？
+						case "Gauge":
+							m.value += value
+						case "Percentile":				//percentile类型的更新是否正确？
+							p50 := metric.Get("p50").Float()
+							m.values[0] = math.Max(m.values[0], p50)
+							p90 := metric.Get("p90").Float()
+							m.values[1] = math.Max(m.values[0], p90)
+							p95 := metric.Get("p95").Float()
+							m.values[2] = math.Max(m.values[0], p95)
+							p99 := metric.Get("p99").Float()
+							m.values[3] = math.Max(m.values[0], p99)
+							p999 := metric.Get("p999").Float()
+							m.values[4] = math.Max(m.values[0], p999)
+						case "Histogram":
+						default:
+							log.Errorf("Unsupport metric type %s", mtype)
+						}
+					}
+				}
+			}
+		} else {
+			var mts Metrics
+			for _, metric := range metrics {
+				name := metric.Get("name").String()
+				mtype := metric.Get("type").String()
+				value := metric.Get("value").Float()
+				var values []float64
+				if mtype == "percentile" {
+					values = append(values, metric.Get("p50").Float())
+					values = append(values, metric.Get("p90").Float())
+					values = append(values, metric.Get("p95").Float())
+					values = append(values, metric.Get("p99").Float())
+					values = append(values, metric.Get("p999").Float())
+				}
+				m := Metric{name: name, mtype: mtype, value: value, values: values}
+				mts = append(mts, m)
+			}
+			(*metricsByTaskName)[taskName] = mts
+		}
+}
+
 func mergeIntoClusterLevelServerMetric(metrics []gjson.Result, metricsOfCluster []Metric) {
 	for _, metric := range metrics {
 		name := metric.Get("name").String()
@@ -590,6 +712,7 @@ func mergeIntoClusterLevelServerMetric(metrics []gjson.Result, metricsOfCluster 
 		}
 	}
 }
+
 
 func mergeIntoClusterLevelTableMetric(metrics []gjson.Result, tableID string,
 	metricsByTableID *map[string]Metrics) {
@@ -664,6 +787,7 @@ func httpGet(url string) (string, error) {
 	return string(body), nil
 }
 
+//集群数据，记录主节点编号
 func getClusterInfo() (string, error) {
 	addrs := viper.GetStringSlice("meta_servers")
 	url := fmt.Sprintf("http://%s/meta/cluster", addrs[0])
@@ -675,6 +799,7 @@ func getTableInfo(pMetaServer string) (string, error) {
 	return httpGet(url)
 }
 
+//更新集群的所有表的信息 --- id name
 func updateClusterTableInfo() {
 	// Get primary meta server address.
 	data, err := getClusterInfo()
