@@ -26,12 +26,9 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/limowang/collector/metrics"
-
-	"github.com/limowang/collector/avail"
-
-	//"github.com/pegasus-kv/collector/metrics"
-	"github.com/limowang/collector/webui"
+	"github.com/apache/incubator-pegasus/collector/avail"
+	"github.com/apache/incubator-pegasus/collector/metrics"
+	"github.com/apache/incubator-pegasus/collector/webui"
 	"github.com/prometheus/client_golang/prometheus"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
@@ -63,7 +60,6 @@ func setupSignalHandler(shutdownFunc func()) {
 }
 
 func main() {
-	registry := prometheus.NewRegistry()
 	// initialize logging
 	log.SetFormatter(&log.TextFormatter{
 		DisableColors:    true,
@@ -86,11 +82,8 @@ func main() {
 		return
 	}
 
-	metrics.InitMetrics()
-
-	// var meta_collector Collector
-	// var replic_collector Collector
-	//webui.StartWebServer()
+	registry := prometheus.NewRegistry()
+	webui.StartWebServer(registry)
 
 	tom := &tomb.Tomb{}
 	setupSignalHandler(func() {
@@ -102,19 +95,10 @@ func main() {
 	})
 	tom.Go(func() error {
 		return metrics.NewMetaServerMetricCollector().Start(tom)
-		// meta_collector = metrics.NewMetaServerMetricCollector()
-		// return metrics.meta_collector.Start(tom)
 	})
 	tom.Go(func() error {
 		return metrics.NewReplicaServerMetricCollector().Start(tom)
-		// replic_collector = metrics.NewReplicaServerMetricCollector()
-		// return replic_collector.Start(tom)
 	})
 
-	webui.StartWebServer(registry)
 	<-tom.Dead() // gracefully wait until all goroutines dead
-
-	//webui.StartWebServer()
-
-	//webui.StartWebServer(meta_collector,replic_collector)
 }
