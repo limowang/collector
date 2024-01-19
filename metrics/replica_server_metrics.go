@@ -17,7 +17,9 @@
 
 package metrics
 
-func NewReplicaServerMetricCollector() MetricCollector {
+import "github.com/prometheus/client_golang/prometheus"
+
+func NewReplicaServerMetricCollector(registry prometheus.Registerer) MetricCollector {
 	// Set detect interval and timeout 10s.
-	return NewMetricCollector(ReplicaServer, 10000000000, 10000000000)
+	return NewMetricCollector(registry, ReplicaServer, 10000000000, 10000000000)
 }

@@ -49,34 +49,31 @@ type Metric struct {
 
 type Metrics []Metric
 
-var GaugeMetricsMap map[string]prometheus.GaugeVec
-var CounterMetricsMap map[string]prometheus.CounterVec
-var SummaryMetricsMap map[string]prometheus.Summary
-
-var TableNameByID map[string]string
+var TableNameByID map[string]string = make(map[string]string, 128)
 
 type MetricCollector interface {
 	Start(tom *tomb.Tomb) error
 }
 
 func NewMetricCollector(
+	registry prometheus.Registerer,
 	role string,
 	detectInterval time.Duration,
 	detectTimeout time.Duration) MetricCollector {
-	GaugeMetricsMap = make(map[string]prometheus.GaugeVec, 128)
-	CounterMetricsMap = make(map[string]prometheus.CounterVec, 128)
-	SummaryMetricsMap = make(map[string]prometheus.Summary, 128)
-	TableNameByID = make(map[string]string, 128)
-
 	var collector = Collector{detectInterval: detectInterval, detectTimeout: detectTimeout, role: role}
 	collector.initMetrics()
+	collector.registerMetrics()
 	return &collector
 }
 
 type Collector struct {
+	counterMetricsMap map[string]prometheus.CounterVec
 	detectInterval time.Duration
 	detectTimeout  time.Duration
+	gaugeMetricsMap map[string]prometheus.GaugeVec
+	registry prometheus.Registerer
 	role           string
+	summaryMetricsMap map[string]prometheus.Summary
 }
 
 func (collector *Collector) Start(tom *tomb.Tomb) error {
@@ -117,6 +114,15 @@ func getReplicaAddrs() ([]string, error) {
 	return rserverAddrs, nil
 }
 
+func (collector *Collector) registerMetrics() {
+	for _, cV := range collector.counterMetricsMap {
+		collector.registry.MustRegister(cV)
+	}
+	for _, gV := range collector.gaugeMetricsMap {
+		collector.registry.MustRegister(gV)
+	}
+}
+
 // Register all metrics.
 func (collector *Collector) initMetrics() {
 	var addrs []string
@@ -130,6 +136,11 @@ func (collector *Collector) initMetrics() {
 			return
 		}
 	}
+
+	collector.gaugeMetricsMap = make(map[string]prometheus.GaugeVec, 128)
+	collector.counterMetricsMap = make(map[string]prometheus.CounterVec, 128)
+	collector.summaryMetricsMap = make(map[string]prometheus.Summary, 128)
+
 	for _, addr := range addrs {
 		data, err := getOneServerMetrics(addr)
 		if err != nil {
@@ -144,25 +155,25 @@ func (collector *Collector) initMetrics() {
 				var desc string = metric.Get("desc").String()
 				switch mtype {
 				case "Counter":
-					if _, ok := CounterMetricsMap[name]; ok {
+					if _, ok := collector.counterMetricsMap[name]; ok {
 						continue
 					}
 					counterMetric := promauto.NewCounterVec(prometheus.CounterOpts{
 						Name: name,
 						Help: desc,
 					}, []string{"endpoint", "role", "level", "title"})
-					CounterMetricsMap[name] = *counterMetric
+					collector.counterMetricsMap[name] = *counterMetric
 				case "Gauge":
-					if _, ok := GaugeMetricsMap[name]; ok {
+					if _, ok := collector.gaugeMetricsMap[name]; ok {
 						continue
 					}
 					gaugeMetric := promauto.NewGaugeVec(prometheus.GaugeOpts{
 						Name: name,
 						Help: desc,
 					}, []string{"endpoint", "role", "level", "title"})
-					GaugeMetricsMap[name] = *gaugeMetric
+					collector.gaugeMetricsMap[name] = *gaugeMetric
 				case "Percentile":
-					if _, ok := SummaryMetricsMap[name]; ok {
+					if _, ok := collector.summaryMetricsMap[name]; ok {
 						continue
 					}
 					summaryMetric := promauto.NewSummary(prometheus.SummaryOpts{
@@ -171,7 +182,7 @@ func (collector *Collector) initMetrics() {
 						Objectives: map[float64]float64{
 							0.5: 0.05, 0.9: 0.01, 0.95: 0.005, 0.99: 0.001, 0.999: 0.0001},
 					})
-					SummaryMetricsMap[name] = summaryMetric
+					collector.summaryMetricsMap[name] = summaryMetric
 				case "Histogram":
 				default:
 					log.Errorf("Unsupport metric type %s", mtype)
@@ -285,7 +296,7 @@ func (collector *Collector) updateClusterLevelTableMetrics(metricsByTableID map[
 func (collector *Collector) updateMetric(metric Metric, endpoint string, level string, title string) {
 	switch metric.mtype {
 	case "Counter":
-		if counter, ok := CounterMetricsMap[metric.name]; ok {
+		if counter, ok := collector.counterMetricsMap[metric.name]; ok {
 			counter.With(
 				prometheus.Labels{"endpoint": endpoint,
 					"role": collector.role, "level": level,
@@ -294,7 +305,7 @@ func (collector *Collector) updateMetric(metric Metric, endpoint string, level s
 			log.Warnf("Unknown metric name %s", metric.name)
 		}
 	case "Gauge":
-		if gauge, ok := GaugeMetricsMap[metric.name]; ok {
+		if gauge, ok := collector.gaugeMetricsMap[metric.name]; ok {
 			gauge.With(
 				prometheus.Labels{"endpoint": endpoint,
 					"role": collector.role, "level": level,

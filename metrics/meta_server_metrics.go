@@ -17,7 +17,9 @@
 
 package metrics
 
-func NewMetaServerMetricCollector() MetricCollector {
+import "github.com/prometheus/client_golang/prometheus"
+
+func NewMetaServerMetricCollector(registry prometheus.Registerer) MetricCollector {
 	// Set detect interval and timeout 10s.
-	return NewMetricCollector(MetaServer, 10000000000, 10000000000)
+	return NewMetricCollector(registry, MetaServer, 10000000000, 10000000000)
 }

@@ -27,8 +27,8 @@ import (
 	"syscall"
 
 	"github.com/apache/incubator-pegasus/collector/avail"
-	"github.com/apache/incubator-pegasus/collector/metrics"
 	"github.com/apache/incubator-pegasus/collector/webui"
+	"github.com/limowang/collector/metrics"
 	"github.com/prometheus/client_golang/prometheus"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
@@ -94,10 +94,10 @@ func main() {
 		return avail.NewDetector(10000000000, 10000000000, 16).Start(tom)
 	})
 	tom.Go(func() error {
-		return metrics.NewMetaServerMetricCollector().Start(tom)
+		return metrics.NewMetaServerMetricCollector(registry).Start(tom)
 	})
 	tom.Go(func() error {
-		return metrics.NewReplicaServerMetricCollector().Start(tom)
+		return metrics.NewReplicaServerMetricCollector(registry).Start(tom)
 	})
 
 	<-tom.Dead() // gracefully wait until all goroutines dead

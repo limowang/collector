@@ -21,7 +21,6 @@ import (
 	"context"
 	"time"
 
-	"github.com/apache/incubator-pegasus/collector/metrics"
 	"github.com/kataras/iris/v12"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -29,13 +28,6 @@ import (
 
 // StartWebServer starts an iris-powered HTTP server.
 func StartWebServer(registry prometheus.Registerer) {
-	for _, cV := range metrics.CounterMetricsMap {
-		registry.MustRegister(cV)
-	}
-	for _, gV := range metrics.GaugeMetricsMap {
-		registry.MustRegister(gV)
-	}
-
 	app := iris.New()
 	app.Get("/", indexHandler)
 	app.Get("/tables", tablesHandler)
