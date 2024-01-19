@@ -32,6 +32,7 @@ import (
 
 	//"github.com/pegasus-kv/collector/metrics"
 	"github.com/limowang/collector/webui"
+	"github.com/prometheus/client_golang/prometheus"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 	"gopkg.in/natefinch/lumberjack.v2"
@@ -62,6 +63,7 @@ func setupSignalHandler(shutdownFunc func()) {
 }
 
 func main() {
+	registry := prometheus.NewRegistry()
 	// initialize logging
 	log.SetFormatter(&log.TextFormatter{
 		DisableColors:    true,
@@ -109,7 +111,7 @@ func main() {
 		// return replic_collector.Start(tom)
 	})
 
-	webui.StartWebServer()
+	webui.StartWebServer(registry)
 	<-tom.Dead() // gracefully wait until all goroutines dead
 
 	//webui.StartWebServer()
